@@ -1,0 +1,4 @@
+# Both Nirvani org admins own every path. GitHub requests review from the
+# owners on each pull request and skips the author, so each admin is asked
+# to review the other's changes.
+* @nirvani-ai @Integrity-Agency
