@@ -1,0 +1,17 @@
+{
+  "name": "nirvani",
+  "displayName": "Nirvani",
+  "version": "1.0.0",
+  "description": "Run your Nirvani workspace from Claude: find and update contacts, move deals through pipelines, book appointments, and send messages.",
+  "author": {
+    "name": "Nirvani Company",
+    "email": "support@nirvani.ai",
+    "url": "https://nirvani.ai"
+  },
+  "homepage": "https://mcp.nirvani.ai/docs",
+  "repository": "https://github.com/Nirvani-Company/nirvani-claude-plugin",
+  "license": "MIT",
+  "privacyPolicyUrl": "https://mcp.nirvani.ai/privacy",
+  "icon": ".claude-plugin/icon.png",
+  "keywords": ["crm", "contacts", "pipeline", "appointments", "sms", "email", "nirvani"]
+}
