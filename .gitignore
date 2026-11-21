@@ -1,0 +1,17 @@
+# Dependencies and local tooling
+node_modules/
+
+# Environment and secrets: never commit
+.env
+.env.*
+*.pem
+*.key
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs
+*.log

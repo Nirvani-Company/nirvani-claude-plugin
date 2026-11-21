@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Account, workspace access or billing
+    url: https://mcp.nirvani.ai/support
+    about: Sign-in problems, workspace access and account questions go to Nirvani support, not GitHub.
+  - name: Documentation
+    url: https://mcp.nirvani.ai/docs
+    about: Setup, sign-in and tool reference for the Nirvani connector.
+  - name: Report a security vulnerability
+    url: https://github.com/Nirvani-Company/nirvani-claude-plugin/security/advisories/new
+    about: Report privately. Never open a public issue for a security problem.

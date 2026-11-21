@@ -1,0 +1,23 @@
+{
+  "description": "Official Nirvani plugin for Claude: run your Nirvani workspace (contacts, deals, calendars and messages) from Claude through the Nirvani remote MCP server.",
+  "homepage": "https://mcp.nirvani.ai/docs",
+  "topics": [
+    "nirvani",
+    "claude",
+    "claude-plugin",
+    "claude-code",
+    "claude-code-plugin",
+    "mcp",
+    "model-context-protocol",
+    "remote-mcp",
+    "oauth2",
+    "crm",
+    "ai-agents",
+    "sales-automation"
+  ],
+  "has_wiki": false,
+  "has_projects": false,
+  "private_vulnerability_reporting": true,
+  "secret_scanning": true,
+  "secret_scanning_push_protection": true
+}

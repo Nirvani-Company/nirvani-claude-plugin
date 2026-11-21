@@ -1,0 +1,62 @@
+name: Bug report
+description: Something in the Nirvani plugin or skill does not work as documented.
+title: "Bug: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste access tokens, sign-in codes, or customer data. For sign-in or workspace access problems, contact https://mcp.nirvani.ai/support instead.
+  - type: dropdown
+    id: client
+    attributes:
+      label: Claude client
+      options:
+        - Claude Code
+        - Claude on the web
+        - Claude desktop
+        - Claude mobile
+    validations:
+      required: true
+  - type: input
+    id: client-version
+    attributes:
+      label: Client version
+      description: For Claude Code, run `claude --version`.
+      placeholder: "2.1.330"
+    validations:
+      required: true
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: From `/plugin list` in Claude Code. Leave blank when you use the connector on the web, desktop or mobile.
+      placeholder: "1.0.0"
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you asked Claude, what it did, and the exact message you saw.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: when
+    attributes:
+      label: When it happened
+      description: Date, time and timezone, so the team can find it in the server logs.
+      placeholder: "2026-11-21 14:05 America/Phoenix"
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: This report contains no tokens, sign-in codes, or customer data.
+          required: true
