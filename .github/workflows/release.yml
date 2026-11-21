@@ -1,0 +1,91 @@
+name: Release
+
+# Publishes a release when main carries a plugin version that has no tag yet. Idempotent: a version that
+# is already tagged is reported and skipped, so re-runs and unrelated pushes change nothing.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".claude-plugin/**"
+      - "CHANGELOG.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CLAUDE_CODE_VERSION: "2.1.330"
+  DISABLE_AUTOUPDATER: "1"
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+
+jobs:
+  release:
+    name: Tag and publish
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+
+      - name: Read the version
+        id: version
+        run: |
+          version="$(node -p "require('./.claude-plugin/plugin.json').version")"
+          name="$(node -p "require('./.claude-plugin/plugin.json').name")"
+          tag="${name}--v${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "${tag} is already released; nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Static checks
+        if: steps.version.outputs.exists == 'false'
+        run: node scripts/check-repo.mjs
+
+      - name: Install Claude Code ${{ env.CLAUDE_CODE_VERSION }}
+        if: steps.version.outputs.exists == 'false'
+        run: npm install --global --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+      - name: Validate as the directory would
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          claude plugin validate .claude-plugin/marketplace.json --strict
+          claude plugin validate .claude-plugin/plugin.json --strict --profile directory
+
+      - name: Write release notes
+        if: steps.version.outputs.exists == 'false'
+        run: node scripts/release-notes.mjs "${{ steps.version.outputs.version }}" > "$RUNNER_TEMP/notes.md"
+
+      - name: Tag
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          claude plugin tag . --message "Nirvani for Claude %s" --push
+
+      - name: Publish the release
+        if: steps.version.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --verify-tag \
+            --title "Nirvani for Claude ${{ steps.version.outputs.version }}" \
+            --notes-file "$RUNNER_TEMP/notes.md"
+          echo "Released ${{ steps.version.outputs.tag }}." >> "$GITHUB_STEP_SUMMARY"

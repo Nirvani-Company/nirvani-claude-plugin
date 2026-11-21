@@ -1,0 +1,33 @@
+name: Feature request
+description: Ask for a new capability in the Nirvani plugin or connector.
+title: "Request: "
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome you want
+      description: What you want Claude to do in your Nirvani workspace, in one or two sentences.
+      placeholder: "Let Claude mark a deal as won and log the closing note in one step."
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: How you do it today
+      description: The steps you take now, and roughly how often.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Contacts
+        - Deals and pipelines
+        - Calendars and appointments
+        - Conversations and messages
+        - Sign-in and permissions
+        - Something else
+    validations:
+      required: true

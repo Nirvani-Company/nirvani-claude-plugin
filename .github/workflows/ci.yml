@@ -1,0 +1,145 @@
+name: CI
+
+# Every pull request and every push to main must pass all four jobs. The daily run re-proves the live
+# contract and opens (or closes) a tracking issue, so a broken sign-in or endpoint surfaces before a
+# customer reports it. Nothing here deploys or changes production.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 13 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CLAUDE_CODE_VERSION: "2.1.330"
+  NODE_VERSION: "22"
+
+jobs:
+  repo:
+    name: Repository checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Static checks
+        run: node scripts/check-repo.mjs
+
+  white-label:
+    name: White-label firewall
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Scan every file for upstream provider names
+        # Fails closed: a run without the secret (an outside fork, or the secret not shared with this
+        # repository) fails rather than passing unchecked. Hits print file, line and term number only.
+        env:
+          NIRVANI_FORBIDDEN_TERMS: ${{ secrets.NIRVANI_FORBIDDEN_TERMS }}
+        run: node scripts/check-repo.mjs --require-white-label
+
+  validate:
+    name: Plugin validation (directory profile, strict)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install Claude Code ${{ env.CLAUDE_CODE_VERSION }}
+        env:
+          DISABLE_AUTOUPDATER: "1"
+        run: npm install --global --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+      - name: Validate the marketplace manifest
+        env:
+          DISABLE_AUTOUPDATER: "1"
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+        run: claude plugin validate .claude-plugin/marketplace.json --strict
+      - name: Validate the plugin as the directory would
+        env:
+          DISABLE_AUTOUPDATER: "1"
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+        run: |
+          claude plugin validate .claude-plugin/plugin.json --strict --profile directory
+          claude plugin validate . --strict --profile directory
+      - name: Confirm the release tag is consistent
+        env:
+          DISABLE_AUTOUPDATER: "1"
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+        run: claude plugin tag . --dry-run --force
+
+  live:
+    name: Live contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Prove the server, sign-in metadata and links
+        run: node scripts/check-live.mjs
+
+  monitor:
+    name: Track scheduled failures
+    needs: [repo, white-label, validate, live]
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open, update or close the tracking issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        with:
+          script: |
+            const results = JSON.parse(process.env.RESULTS);
+            const failed = Object.entries(results).filter(([, job]) => job.result !== 'success').map(([name, job]) => `${name} (${job.result})`);
+            const title = 'Scheduled CI is failing';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const { data: open } = await github.rest.issues.listForRepo({ ...context.repo, state: 'open', labels: 'ci-monitor', per_page: 10 });
+            const existing = open.find((issue) => issue.title === title);
+            if (failed.length > 0) {
+              const body = `The scheduled CI run failed: ${failed.join(', ')}.\n\nRun: ${runUrl}\n\nThis issue closes itself on the next passing scheduled run.`;
+              if (existing) {
+                await github.rest.issues.createComment({ ...context.repo, issue_number: existing.number, body });
+              } else {
+                try {
+                  await github.rest.issues.getLabel({ ...context.repo, name: 'ci-monitor' });
+                } catch {
+                  await github.rest.issues.createLabel({ ...context.repo, name: 'ci-monitor', color: 'b60205', description: 'Opened and closed by the scheduled CI run' });
+                }
+                await github.rest.issues.create({ ...context.repo, title, body, labels: ['ci-monitor'] });
+              }
+              core.setFailed(`Scheduled CI failed: ${failed.join(', ')}`);
+            } else if (existing) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: existing.number, body: `Passing again. Run: ${runUrl}` });
+              await github.rest.issues.update({ ...context.repo, issue_number: existing.number, state: 'closed', state_reason: 'completed' });
+            }
