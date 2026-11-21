@@ -1,0 +1,141 @@
+name: Repository settings
+
+# Keeps the repository's About box and security settings equal to .github/repository.json.
+# Pull requests run a plan: they prove the credential works and show the difference, changing nothing.
+# Main, the weekly schedule and manual runs apply the file and read every value back.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/repository.json"
+      - ".github/workflows/repo-settings.yml"
+  push:
+    branches: [main]
+    paths:
+      - ".github/repository.json"
+      - ".github/workflows/repo-settings.yml"
+  schedule:
+    - cron: "41 14 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-settings
+  cancel-in-progress: false
+
+jobs:
+  settings:
+    name: ${{ github.event_name == 'pull_request' && 'Plan' || 'Apply' }} repository settings
+    # Outside forks get no secrets, so they skip rather than fail.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Mint a short-lived automation token
+        id: token
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.NIRVANI_AUTOMATION_APP_CLIENT_ID || secrets.NIRVANI_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.NIRVANI_AUTOMATION_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-administration: write
+          permission-metadata: read
+
+      - name: Explain a missing credential
+        if: steps.token.outcome != 'success'
+        run: |
+          {
+            echo "### Repository settings could not run"
+            echo ""
+            echo "The Nirvani automation app could not mint a token with **Administration: write** on this repository."
+            echo "One of these is missing: the app's client id variable or private key secret is not shared with this repository,"
+            echo "the app is not installed on this repository, or its installation lacks the Administration (write) permission."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error::The automation app token could not be minted; see the job summary."
+          exit 1
+
+      - name: ${{ github.event_name == 'pull_request' && 'Plan' || 'Apply and verify' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          MODE: ${{ github.event_name == 'pull_request' && 'plan' || 'apply' }}
+        with:
+          github-token: ${{ steps.token.outputs.token }}
+          script: |
+            const fs = require('node:fs');
+            const want = JSON.parse(fs.readFileSync('.github/repository.json', 'utf8'));
+            const repo = context.repo;
+            const apply = process.env.MODE === 'apply';
+
+            async function readState() {
+              const { data } = await github.rest.repos.get(repo);
+              const { data: topics } = await github.rest.repos.getAllTopics(repo);
+              let pvr = null;
+              try {
+                const { data: status } = await github.request('GET /repos/{owner}/{repo}/private-vulnerability-reporting', repo);
+                pvr = status.enabled;
+              } catch (error) {
+                core.warning(`Could not read private vulnerability reporting: ${error.message}`);
+              }
+              const sa = data.security_and_analysis ?? {};
+              return {
+                description: data.description ?? '',
+                homepage: data.homepage ?? '',
+                topics: [...topics.names].sort(),
+                has_wiki: data.has_wiki,
+                has_projects: data.has_projects,
+                private_vulnerability_reporting: pvr,
+                secret_scanning: sa.secret_scanning?.status === 'enabled',
+                secret_scanning_push_protection: sa.secret_scanning_push_protection?.status === 'enabled',
+              };
+            }
+
+            const desired = { ...want, topics: [...want.topics].sort() };
+            const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+            const diff = (state) => Object.keys(desired).filter((key) => !same(state[key], desired[key]));
+
+            const before = await readState();
+            const pending = diff(before);
+            const rows = Object.keys(desired).map((key) => `| ${key} | ${JSON.stringify(before[key])} | ${JSON.stringify(desired[key])} | ${pending.includes(key) ? 'change' : 'ok'} |`);
+            await core.summary
+              .addHeading(apply ? 'Repository settings: apply' : 'Repository settings: plan', 3)
+              .addRaw(['| Setting | Current | Wanted | Action |', '| --- | --- | --- | --- |', ...rows].join('\n') + '\n')
+              .write();
+
+            if (!apply || pending.length === 0) {
+              core.info(pending.length === 0 ? 'Settings already match.' : `Plan only: ${pending.join(', ')} would change.`);
+              return;
+            }
+
+            await github.rest.repos.update({
+              ...repo,
+              description: desired.description,
+              homepage: desired.homepage,
+              has_wiki: desired.has_wiki,
+              has_projects: desired.has_projects,
+              security_and_analysis: {
+                secret_scanning: { status: desired.secret_scanning ? 'enabled' : 'disabled' },
+                secret_scanning_push_protection: { status: desired.secret_scanning_push_protection ? 'enabled' : 'disabled' },
+              },
+            });
+            await github.rest.repos.replaceAllTopics({ ...repo, names: desired.topics });
+            await github.request(
+              `${desired.private_vulnerability_reporting ? 'PUT' : 'DELETE'} /repos/{owner}/{repo}/private-vulnerability-reporting`,
+              repo,
+            );
+
+            const after = await readState();
+            const remaining = diff(after);
+            if (remaining.length > 0) {
+              core.setFailed(`Settings still differ after apply: ${remaining.join(', ')}`);
+            } else {
+              core.info('All settings applied and verified.');
+            }
